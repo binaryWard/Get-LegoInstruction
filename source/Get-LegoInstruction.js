@@ -27,7 +27,7 @@ const dataValidation = {
 const dataReplace = {
     globalReplace: [
         {
-            regEx: new RegExp("(%20|[/\"”)(#™:®+\\\\,–!•?\\[\\]¿@*~$&^%=;{}|<>‘’¨])+", "g"),
+            regEx: new RegExp("(%20|[/\"”“)(#™:®+\\\\,–!•?\\[\\]¿@*~$&^%=;{}|<>‘’¨])+", "g"),
             value: " "
         },
         {
