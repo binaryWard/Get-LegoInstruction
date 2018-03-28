@@ -1,19 +1,24 @@
 'use strict';
 
-// command
-// node .\Get-LegoInstructions.js "DownloadPath"
-
 const puppeteer = require('puppeteer');
 const { URL } = require('url');
 const legacyURL = require('url');
 const path = require('path');
 const fs = require('fs');
 
-const getInstructionRepository = {
-    searchData: {
-        themeDataSelector: "body > div:nth-child(6) > div > div > div:nth-child(1) > div:nth-child(2) > div"
+const legoSiteResource = {
+    url: 'https://www.lego.com/en-us/service/buildinginstructions',
+    buildingInstructions: {
+        formItems: {
+            themeData: {
+                selector: "body > div:nth-child(6) > div > div > div:nth-child(1) > div:nth-child(2) > div"
+            },
+            getSearchUrl: function (dataIndex, themeId) {
+                return `https://www.lego.com//service/biservice/searchbytheme?fromIndex=${dataIndex}&onlyAlternatives=false&theme=${themeId}`;
+            }
+        }
     }
-};
+}
 
 const dataValidation = {
     productTheme: new RegExp("^[^\\s][\\w &\\-']+[^\\s]?$", "g"),
@@ -78,6 +83,43 @@ const dataNormalize = {
         {
             regEx: new RegExp("\\s\\s+", "g"),
             value: " "
+        }
+    ]
+};
+
+const isDesiredInstructionRegEx = {
+    v39: [
+        {
+            regEx: new RegExp("(?:(?:^|\\W| |\\d)[vV] ?39(?:\\D|$))|(?: 39(?:(?:[ \\w])|$))|(?:\\wV39)", "g")
+        },
+        {
+            regEx: new RegExp("[\\W ][nNaA][aAmM]39(?:[\\W]|$)", "g")
+        },
+        {
+            regEx: new RegExp(" US(?:(?: )|$)", "g")
+        },
+        {
+            regEx: new RegExp("(?:^|\\W| |\\d)[nNaA][aAmM](?:(?: )|(?:\\W)|(?:\\d)|(?:$))", "g")
+        }
+    ]
+};
+
+const isDesiredInstructionExceptionRegEx = {
+    getProductId: function (productId) {
+        return new RegExp(`(?:(?:^)|(?: )|(?:\\w))(${productId})(?:(?:\\D)|(?:$))`);
+    }
+};
+
+const isNotDesiredInstructionRegEx = {
+    v29: [
+        {
+            regEx: new RegExp("(?:(?:^|\\W| |\\d)[vV] ?29(?:\\D|$))|(?: 29(?:(?:[ \\w])|$))|(?:\\wV29)", "g")
+        },
+        {
+            regEx: new RegExp("[\\W ][iI][nN]29(?:[\\W]|$)", "g")
+        },
+        {
+            regEx: new RegExp("(?:^|\\W| |\\d)[iI][nN](?:(?: )|(?:\\W)|(?:\\d)|(?:$))", "g")
         }
     ]
 };
@@ -188,7 +230,6 @@ class dataPurification {
 
     static cleanInstructionDescription(value) {
         for (let i = 0; i < dataReplace.instructionDescriptionReplace.length; i++) {
-            //console.log(`         [match]: ${dataReplace.instructionDescriptionReplace[i].regEx.exec(value)}`);
             value = value.replace(dataReplace.instructionDescriptionReplace[i].regEx, dataReplace.instructionDescriptionReplace[i].value);
         }
         return value;
@@ -227,15 +268,15 @@ class dataPurification {
 
     try {
         const page = await browser.newPage();
-        await page.goto('https://www.lego.com/en-us/service/buildinginstructions');
+        await page.goto(legoSiteResource.url);
 
         const themeSearchData = await getThemeSearchData(page);
 
         for (var i = 0; i < themeSearchData.length; i++) {
-            let hasMoreData = true; // initialize the loop iterator to make an initial request
+            let hasMoreData = true; 
             let dataIndex = 0;
             while (hasMoreData) {
-                let searchUrl = getSearchUrl(dataIndex, themeSearchData[i].Key);
+                let searchUrl = legoSiteResource.buildingInstructions.formItems.getSearchUrl(dataIndex, themeSearchData[i].Key);
                 let searchResponse = await page.goto(searchUrl);
 
                 try {
@@ -262,14 +303,9 @@ async function getThemeSearchData(page) {
     const selectedItem = await page.evaluate(selector => {
         let item = document.querySelector(selector);
         return item.getAttribute("data-search-themes");
-    }, getInstructionRepository.searchData.themeDataSelector);
+    }, legoSiteResource.buildingInstructions.formItems.themeData.selector);
     return JSON.parse(selectedItem);
 }
-
-function getSearchUrl(dataIndex, themeId) {
-    return `https://www.lego.com//service/biservice/searchbytheme?fromIndex=${dataIndex}&onlyAlternatives=false&theme=${themeId}`;
-}
-
 
 async function processProducts(products, legoInstructionRepsitoryPath) {
     for (var i = 0; i < products.length; i++) {
@@ -295,6 +331,7 @@ async function processProduct(product, legoInstructionRepsitoryPath) {
 
     let hasInstruction = false;
     for (var i = 0; i < buildingInstructions.length; i++) {
+        console.log("")
         let buildingInstructionDescription = dataPurification.purifyInstructionDescription(buildingInstructions[i].description);
         let isDesired = isDesiredInstruction(buildingInstructionDescription, productId);
         if (!isDesired) {
@@ -322,7 +359,6 @@ async function downloadInstruction(instructionUrl, instructionTempFilename, inst
     if (!fs.existsSync(instructionFilePath)) {
         await downloadFile(instructionUrl, instructionTempFilename, null);
         if (fs.existsSync(instructionTempFilename)) {
-
             fs.renameSync(instructionTempFilename, instructionFilePath);
         }
         else {
@@ -330,48 +366,11 @@ async function downloadInstruction(instructionUrl, instructionTempFilename, inst
         }
     }
     else {
-        console.log("     [already have instructions]");
+        console.log("[already have instructions]");
     }
 }
 
 function isDesiredInstruction(instructionDescription, productId) {
-    const isDesiredInstructionRegEx = {
-        v39: [
-            {
-                regEx: new RegExp("(?:(?:^|\\W| |\\d)[vV] ?39(?:\\D|$))|(?: 39(?:(?:[ \\w])|$))|(?:\\wV39)", "g")
-            },
-            {
-                regEx: new RegExp("[\\W ][nNaA][aAmM]39(?:[\\W]|$)", "g")
-            },
-            {
-                regEx: new RegExp(" US(?:(?: )|$)", "g")
-            },
-            {
-                regEx: new RegExp("(?:^|\\W| |\\d)[nNaA][aAmM](?:(?: )|(?:\\W)|(?:\\d)|(?:$))", "g")
-            }
-        ]
-    };
-
-    const isNotDesiredInstructionRegEx = {
-        v29: [
-            {
-                regEx: new RegExp("(?:(?:^|\\W| |\\d)[vV] ?29(?:\\D|$))|(?: 29(?:(?:[ \\w])|$))|(?:\\wV29)", "g")
-            },
-            {
-                regEx: new RegExp("[\\W ][iI][nN]29(?:[\\W]|$)", "g")
-            },
-            {
-                regEx: new RegExp("(?:^|\\W| |\\d)[iI][nN](?:(?: )|(?:\\W)|(?:\\d)|(?:$))", "g")
-            }
-        ]
-    };
-
-    let isDesiredInstructionExceptionRegEx = {
-        getProductId: function (productId) {
-            return new RegExp(`(?:(?:^)|(?: )|(?:\\w))(${productId})(?:(?:\\D)|(?:$))`);
-        }
-    };
-
     let hasMatch = false;
     let isDesiredMatch = false;
     let matchRegEx = null;
@@ -408,7 +407,7 @@ function isDesiredInstruction(instructionDescription, productId) {
             matchRegEx = regExp.toString();
         }
     }
-
+    
     auditInstructionMatch(hasMatch, isDesiredMatch, productId, instructionDescription, matchRegEx);
     return isDesiredMatch;
 }
@@ -464,10 +463,12 @@ function httpRequest(url, method, response) {
 
     const driver = options.protocol === 'https:' ? 'https' : 'http';
     const request = require(driver).request(options, res => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location)
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
             httpRequest(res.headers.location, method, response);
-        else
+        }
+        else {
             response(res);
+        }
     });
     request.end();
     return request;
