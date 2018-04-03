@@ -318,7 +318,7 @@ async function processProducts(products, legoInstructionRepsitoryPath) {
     const productSet = new Array(products.length);
 
     for (var i = 0; i < products.length; i++) {
-        process.stdout.write(".");
+        process.stderr.write(".");
         productSet[i] = await processProduct(products[i], legoInstructionRepsitoryPath);
     }
     return productSet;
