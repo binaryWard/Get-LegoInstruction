@@ -288,7 +288,7 @@ class dataPurification {
                     const legoInstructionRepsitoryPath = path.resolve(path.normalize(LegoInstructionRepositoryDirectory));
                     ensureDirectory(legoInstructionRepsitoryPath);
                     let productSet = await processProducts(instructionsData.products, legoInstructionRepsitoryPath);
-                    for(var p=0; p<productSet.length;p++){
+                    for (var p = 0; p < productSet.length; p++) {
                         legoProducts.push(productSet[p]);
                     }
                 }
@@ -341,20 +341,29 @@ async function processProduct(product, legoInstructionRepsitoryPath) {
     const buildingInstructions = product.buildingInstructions;
 
     const productInfo = {
-        productTheme: productTheme,
-        productYear, productYear,
-        productId: productId,
-        productTitle: productTitle
+        theme: productTheme,
+        year, productYear,
+        id: productId,
+        title: productTitle,
+        instructions: []
     }
 
     let hasInstruction = false;
     for (var i = 0; i < buildingInstructions.length; i++) {
+        let instruction = {
+            description: "",
+            fileInfo: null,
+            matchResult: null,
+        };
+        productInfo.instructions.push(instruction);
         let buildingInstructionDescription = dataPurification.purifyInstructionDescription(buildingInstructions[i].description);
-        let isDesired = isDesiredInstruction(buildingInstructionDescription, productId);
-        if (!isDesired) {
+        instruction.description = buildingInstructionDescription;
+        let matchResult = matchInstruction(buildingInstructionDescription, productId);
+        instruction.matchResult = matchResult;
+        if (!matchResult.isDesired) {
             continue;
         }
-        await getInstruction(buildingInstructions[i].pdfLocation, productId, productDirectoryPath);
+        instruction.fileInfo = await getInstruction(buildingInstructions[i].pdfLocation, productId, productDirectoryPath);
     }
 
     return productInfo;
@@ -371,15 +380,19 @@ async function getInstruction(instructionPdfLocation, productId, productInstruct
 
     const instructionFilePath = path.resolve(productInstructionPath, instructionFilename);
     const instructionTempFilePath = path.resolve(productInstructionPath, instructionTempFilename);
+
+    const instructionFileInfo = {
+        filePath: instructionFilePath,
+        isNew: false,
+    };
     if (!fs.existsSync(instructionFilePath)) {
         await downloadInstruction(instructionPdfLocation, instructionTempFilePath, instructionFilePath);
+        instructionFileInfo.isNew = true;
     }
-    else {
-        //console.log("[already have instructions]");
-    }
+    return instructionFileInfo;
 }
 
-function isDesiredInstruction(instructionDescription, productId) {
+function matchInstruction(instructionDescription, productId) {
     let hasMatch = false;
     let isDesiredMatch = false;
     let matchRegEx = null;
@@ -417,7 +430,11 @@ function isDesiredInstruction(instructionDescription, productId) {
         }
     }
 
-    return isDesiredMatch;
+    return {
+        hasMatch: hasMatch, // instruction matched a regular expression
+        isDesired: isDesiredMatch, // the instruction matched a regular expression flagging it as one to download
+        regEx: matchRegEx, // the regular expression if has match 
+    };
 }
 
 function ensureDirectory(directoryPath) {
