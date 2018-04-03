@@ -270,10 +270,12 @@ class dataPurification {
         const page = await browser.newPage();
         await page.goto(legoSiteResource.url);
 
+        const legoProducts = [];
+
         const themeSearchData = await getThemeSearchData(page);
 
         for (var i = 0; i < themeSearchData.length; i++) {
-            let hasMoreData = true; 
+            let hasMoreData = true;
             let dataIndex = 0;
             while (hasMoreData) {
                 let searchUrl = legoSiteResource.buildingInstructions.formItems.getSearchUrl(dataIndex, themeSearchData[i].Key);
@@ -285,7 +287,10 @@ class dataPurification {
                     dataIndex += instructionsData.count;
                     const legoInstructionRepsitoryPath = path.resolve(path.normalize(LegoInstructionRepositoryDirectory));
                     ensureDirectory(legoInstructionRepsitoryPath);
-                    await processProducts(instructionsData.products, legoInstructionRepsitoryPath);
+                    let productSet = await processProducts(instructionsData.products, legoInstructionRepsitoryPath);
+                    for(var p=0; p<productSet.length;p++){
+                        legoProducts.push(productSet[p]);
+                    }
                 }
                 finally {
                     await searchResponse.close;
@@ -293,6 +298,8 @@ class dataPurification {
             }
         }
 
+        const legoProductsJsonString = JSON.stringify(legoProducts);
+        console.log(legoProductsJsonString);
     }
     finally {
         await browser.close();
@@ -308,9 +315,13 @@ async function getThemeSearchData(page) {
 }
 
 async function processProducts(products, legoInstructionRepsitoryPath) {
+    const productSet = new Array(products.length);
+
     for (var i = 0; i < products.length; i++) {
-        await processProduct(products[i], legoInstructionRepsitoryPath);
+        process.stdout.write(".");
+        productSet[i] = await processProduct(products[i], legoInstructionRepsitoryPath);
     }
+    return productSet;
 }
 
 async function processProduct(product, legoInstructionRepsitoryPath) {
@@ -329,19 +340,27 @@ async function processProduct(product, legoInstructionRepsitoryPath) {
     ensureDirectory(productDirectoryPath);
     const buildingInstructions = product.buildingInstructions;
 
+    const productInfo = {
+        productTheme: productTheme,
+        productYear, productYear,
+        productId: productId,
+        productTitle: productTitle
+    }
+
     let hasInstruction = false;
     for (var i = 0; i < buildingInstructions.length; i++) {
-        console.log("")
         let buildingInstructionDescription = dataPurification.purifyInstructionDescription(buildingInstructions[i].description);
         let isDesired = isDesiredInstruction(buildingInstructionDescription, productId);
         if (!isDesired) {
             continue;
         }
-        await processInstruction(buildingInstructions[i].pdfLocation, productId, productDirectoryPath);
+        await getInstruction(buildingInstructions[i].pdfLocation, productId, productDirectoryPath);
     }
+
+    return productInfo;
 }
 
-async function processInstruction(instructionPdfLocation, productId, productInstructionPath) {
+async function getInstruction(instructionPdfLocation, productId, productInstructionPath) {
     const instructionUrl = new URL(instructionPdfLocation);
     const instructionUrlPathname = instructionUrl.pathname;
     const pdfPathIndex = instructionUrlPathname.lastIndexOf("/");
@@ -352,21 +371,11 @@ async function processInstruction(instructionPdfLocation, productId, productInst
 
     const instructionFilePath = path.resolve(productInstructionPath, instructionFilename);
     const instructionTempFilePath = path.resolve(productInstructionPath, instructionTempFilename);
-    await downloadInstruction(instructionPdfLocation, instructionTempFilePath, instructionFilePath);
-}
-
-async function downloadInstruction(instructionUrl, instructionTempFilename, instructionFilePath) {
     if (!fs.existsSync(instructionFilePath)) {
-        await downloadFile(instructionUrl, instructionTempFilename, null);
-        if (fs.existsSync(instructionTempFilename)) {
-            fs.renameSync(instructionTempFilename, instructionFilePath);
-        }
-        else {
-            throw `download failed for ${instructionUrl}`;
-        }
+        await downloadInstruction(instructionPdfLocation, instructionTempFilePath, instructionFilePath);
     }
     else {
-        console.log("[already have instructions]");
+        //console.log("[already have instructions]");
     }
 }
 
@@ -407,18 +416,23 @@ function isDesiredInstruction(instructionDescription, productId) {
             matchRegEx = regExp.toString();
         }
     }
-    
-    auditInstructionMatch(hasMatch, isDesiredMatch, productId, instructionDescription, matchRegEx);
-    return isDesiredMatch;
-}
 
-function auditInstructionMatch(hasMatch, isDesiredMatch, productId, instructionDescription, matchingRegExp) {
-    console.log(`"${hasMatch}","${isDesiredMatch}","${productId}","${instructionDescription}","${matchingRegExp}"`);
+    return isDesiredMatch;
 }
 
 function ensureDirectory(directoryPath) {
     if (fs.existsSync(directoryPath)) { return; }
     fs.mkdirSync(directoryPath);
+}
+
+async function downloadInstruction(instructionUrl, instructionTempFilename, instructionFilePath) {
+    await downloadFile(instructionUrl, instructionTempFilename, null);
+    if (fs.existsSync(instructionTempFilename)) {
+        fs.renameSync(instructionTempFilename, instructionFilePath);
+    }
+    else {
+        throw `download failed for ${instructionUrl}`;
+    }
 }
 
 /**
