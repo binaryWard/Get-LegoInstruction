@@ -342,7 +342,7 @@ async function processProduct(product, legoInstructionRepsitoryPath) {
 
     const productInfo = {
         theme: productTheme,
-        year, productYear,
+        year: productYear,
         id: productId,
         title: productTitle,
         instructions: []
