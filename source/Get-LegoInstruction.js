@@ -400,6 +400,7 @@ function matchInstruction(instructionDescription, productId) {
     // desired match
     for (let i = 0; i < isDesiredInstructionRegEx.v39.length; i++) {
         const regExp = isDesiredInstructionRegEx.v39[i].regEx;
+        regExp.lastIndex = 0;
         if (regExp.test(instructionDescription)) {
             isDesiredMatch = true;
             hasMatch = true;
@@ -412,6 +413,7 @@ function matchInstruction(instructionDescription, productId) {
     if (!hasMatch) {
         for (let i = 0; i < isNotDesiredInstructionRegEx.v29.length; i++) {
             const regExp = isNotDesiredInstructionRegEx.v29[i].regEx;
+            regExp.lastIndex = 0;
             if (regExp.test(instructionDescription)) {
                 hasMatch = true;
                 matchRegEx = regExp.toString();
@@ -423,6 +425,7 @@ function matchInstruction(instructionDescription, productId) {
     // exception desired match
     if (!hasMatch) {
         const regExp = isDesiredInstructionExceptionRegEx.getProductId(productId);
+        regExp.lastIndex = 0;
         if (regExp.test(instructionDescription)) {
             isDesiredMatch = true;
             hasMatch = true;
