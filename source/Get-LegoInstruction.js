@@ -6,6 +6,14 @@ const legacyURL = require('url');
 const path = require('path');
 const fs = require('fs');
 
+/*
+    Hack: data structure to control debugging.
+    1. hack because the lack of unit testing
+*/
+const debugControl = {
+    disableFileDownload: true
+};
+
 const legoSiteResource = {
     url: 'https://www.lego.com/en-us/service/buildinginstructions',
     buildingInstructions: {
@@ -18,7 +26,7 @@ const legoSiteResource = {
             }
         }
     }
-}
+};
 
 const dataValidation = {
     productTheme: new RegExp("^[^\\s][\\w &\\-']+[^\\s]?$", "g"),
@@ -90,7 +98,7 @@ const dataNormalize = {
 const isDesiredInstructionRegEx = {
     v39: [
         {
-            regEx: new RegExp("(?:(?:^|\\W| |\\d)[vV] ?39(?:\\D|$))|(?: 39(?:(?:[ \\w])|$))|(?:\\wV39)", "g")
+            regEx: new RegExp("(?:(?:^|\\W| |\\d)[vV] ?39(?:\\D|$))|(?: 39(?:(?:[ \\D])|$))|(?:\\wV39)", "g")
         },
         {
             regEx: new RegExp("[\\W ][nNaA][aAmM]39(?:[\\W]|$)", "g")
@@ -105,7 +113,7 @@ const isDesiredInstructionRegEx = {
 };
 
 const isDesiredInstructionExceptionRegEx = {
-    getProductId: function (productId) {
+    getHasProductIdRegEx: function (productId) {
         return new RegExp(`(?:(?:^)|(?: )|(?:\\w))(${productId})(?:(?:\\D)|(?:$))`);
     }
 };
@@ -113,13 +121,32 @@ const isDesiredInstructionExceptionRegEx = {
 const isNotDesiredInstructionRegEx = {
     v29: [
         {
-            regEx: new RegExp("(?:(?:^|\\W| |\\d)[vV] ?29(?:\\D|$))|(?: 29(?:(?:[ \\w])|$))|(?:\\wV29)", "g")
+            regEx: new RegExp("(?:(?:^|\\W| |\\d)[vV] ?29(?:\\D|$))|(?: 29(?:(?:[ \\D])|$))|(?:\\wV29)", "g")
         },
         {
             regEx: new RegExp("[\\W ][iI][nN]29(?:[\\W]|$)", "g")
         },
         {
             regEx: new RegExp("(?:^|\\W| |\\d)[iI][nN](?:(?: )|(?:\\W)|(?:\\d)|(?:$))", "g")
+        }
+    ]
+};
+
+
+const isNotDesiredProductRegEx = {
+    copack: [
+        {
+            regEx: new RegExp("(?:^| |-)[Cc][Oo]-?[Pp][Aa][Cc][Kk](?:$| )", "g")
+        }
+    ],
+    valuePack: [
+        {
+            regEx: new RegExp("(?:^| |)[Vv][Aa][Ll][Uu][Ee] [Pp][Aa][Cc][Kk](?:$| )", "g")
+        }
+    ],
+    productTheme: [
+        {
+            regEx: new RegExp("(?:^| )[Cc][Ll][Ii][Kk][Ii][Tt][Ss](?:$| )", "g")
         }
     ]
 };
@@ -324,6 +351,16 @@ async function processProducts(products, legoInstructionRepsitoryPath) {
     return productSet;
 }
 
+function lstringCompare(s1, s2) {
+    return s1 === s2 ? 0 : s1 > s2 ? 1 : -1;
+}
+
+function buildingInstructionCompare(leftInstruction, rightInstruction) {
+    const descriptionResult = lstringCompare(leftInstruction.description, rightInstruction.description);
+
+    return descriptionResult === 0 ? lstringCompare(leftInstruction.pdfLocation, rightInstruction.pdfLocation) : descriptionResult;
+}
+
 async function processProduct(product, legoInstructionRepsitoryPath) {
     const productId = dataPurification.purifyProductId(product.productId);
     const productTitle = dataPurification.purifyProductTitle(product.productName);
@@ -338,32 +375,71 @@ async function processProduct(product, legoInstructionRepsitoryPath) {
     ensureDirectory(productYearDirectoryPath);
     const productDirectoryPath = path.resolve(productYearDirectoryPath, productDirectoryName);
     ensureDirectory(productDirectoryPath);
-    const buildingInstructions = product.buildingInstructions;
+    const buildingInstructions = product.buildingInstructions.sort(buildingInstructionCompare);
 
     const productInfo = {
         theme: productTheme,
         year: productYear,
         id: productId,
         title: productTitle,
-        instructions: []
+        instructions: [],
+        matchResult: null
     }
 
-    let hasInstruction = false;
-    for (var i = 0; i < buildingInstructions.length; i++) {
+    /*
+        Edge cases with product instructions
+        1. Some products have duplicate instructions with the same description but the instruction references a different instruction file.  
+            To filter duplicate instructions the instructions are sorted 
+                check the current instruction is the same description as the last processed.
+            The instruction difference noted in one sample was marketing material.
+            The duplicate instruction selected is based upon the sort order of the instruction description + pdfLocation sorting.
+
+        2. Some products group more than one product together. These are labled with "co-pack" and are typicially duplicate
+            instructions of the individual products.  The "co-pack" products are going to be filtered out in favor of the 
+            individual products.  All instructions upon a match will have the match result assigned the expression that matched it.
+
+        3. A product theme that is not desired.
+    */
+
+    // Product check
+    let productMatchResult = matchProduct(productTitle, productTheme);
+    let hasProductMatch = productMatchResult.hasMatch;
+
+    if (hasProductMatch) {
+        /*
+            the product match result does not represent an aggregate of the instruction match results.
+            it only represents a regular expression match on the product data.
+        */
+        productInfo.matchResult = productMatchResult;
+    }
+
+    // Product building Instruction check
+    const buildingInstructionLength = buildingInstructions.length;
+    let lastInstructionDescription = "";
+    for (var i = 0; i < buildingInstructionLength; i++) {
+        let buildingInstructionDescription = dataPurification.purifyInstructionDescription(buildingInstructions[i].description);
+
+        // filter out instructions with duplicate descriptions.  the first found based upon the sort order is the one used.
+        if (lastInstructionDescription === buildingInstructionDescription) { continue; }
+        lastInstructionDescription = buildingInstructionDescription;
+
         let instruction = {
             description: "",
             fileInfo: null,
             matchResult: null,
         };
-        productInfo.instructions.push(instruction);
-        let buildingInstructionDescription = dataPurification.purifyInstructionDescription(buildingInstructions[i].description);
+
         instruction.description = buildingInstructionDescription;
-        let matchResult = matchInstruction(buildingInstructionDescription, productId);
-        instruction.matchResult = matchResult;
-        if (!matchResult.isDesired) {
-            continue;
+
+        // on product match skip checking instructions for matches.  instructions will have a null for matchResult 
+        if (!hasProductMatch) {
+            let matchResult = matchInstruction(buildingInstructionDescription, productId, buildingInstructionLength, productTitle);
+            instruction.matchResult = matchResult;
+            if (matchResult.isDesired) {
+                instruction.fileInfo = await getInstruction(buildingInstructions[i].pdfLocation, productId, productDirectoryPath);
+            }
         }
-        instruction.fileInfo = await getInstruction(buildingInstructions[i].pdfLocation, productId, productDirectoryPath);
+        productInfo.instructions.push(instruction);
     }
 
     return productInfo;
@@ -392,7 +468,55 @@ async function getInstruction(instructionPdfLocation, productId, productInstruct
     return instructionFileInfo;
 }
 
-function matchInstruction(instructionDescription, productId) {
+function matchProduct(productTitle, productTheme) {
+    let hasMatch = false;
+    let isDesiredMatch = false;
+    let matchRegEx = null;
+
+    // desired match
+
+    // (none defined)
+
+    // not desired match
+
+    // edge case: undesired theme
+    if (!hasMatch) {
+        for (let i = 0; i < isNotDesiredProductRegEx.productTheme.length; i++) {
+            const regExp = isNotDesiredProductRegEx.productTheme[i].regEx;
+            regExp.lastIndex = 0;
+            if (regExp.test(productTheme)) {
+                hasMatch = true;
+                matchRegEx = regExp.toString();
+                break;
+            }
+        }
+    }
+
+    // edge case: Product is a Co-Pack
+    if (!hasMatch) {
+        const regExp = isNotDesiredProductRegEx.copack[0].regEx;
+        regExp.lastIndex = 0;
+        if (regExp.test(productTitle)) {
+            isDesiredMatch = false;
+            hasMatch = true;
+            matchRegEx = regExp.toString();
+        }
+    }
+
+    // edge case product is a value pack
+    if (!hasMatch) {
+        const regExp = isNotDesiredProductRegEx.valuePack[0].regEx;
+        regExp.lastIndex = 0;
+        if (regExp.test(productTitle)) {
+            isDesiredMatch = false;
+            hasMatch = true;
+            matchRegEx = regExp.toString();
+        }
+    }
+    return newMatchResultModel(hasMatch, isDesiredMatch, matchRegEx);
+}
+
+function matchInstruction(instructionDescription, productId, buildingInstructionLength, productTitle) {
     let hasMatch = false;
     let isDesiredMatch = false;
     let matchRegEx = null;
@@ -423,16 +547,31 @@ function matchInstruction(instructionDescription, productId) {
     }
 
     // exception desired match
+
+    // has product ID in the instruction description
     if (!hasMatch) {
-        const regExp = isDesiredInstructionExceptionRegEx.getProductId(productId);
-        regExp.lastIndex = 0;
-        if (regExp.test(instructionDescription)) {
+        const hasProductIdRegExp = isDesiredInstructionExceptionRegEx.getHasProductIdRegEx(productId);
+        hasProductIdRegExp.lastIndex = 0;
+        if (hasProductIdRegExp.test(instructionDescription)) {
             isDesiredMatch = true;
             hasMatch = true;
-            matchRegEx = regExp.toString();
+            matchRegEx = hasProductIdRegExp.toString();
         }
     }
 
+    //  instruction count is one and product title equals instruction description
+    if (!hasMatch) {
+        if (buildingInstructionLength === 1 && productTitle.toUpperCase() === instructionDescription.toUpperCase()) {
+            isDesiredMatch = true;
+            hasMatch = true;
+            matchRegEx = "Instruction.Length == 1 && Product.Title === Instruction.Description"
+        }
+    }
+
+    return newMatchResultModel(hasMatch, isDesiredMatch, matchRegEx);
+}
+
+function newMatchResultModel(hasMatch, isDesiredMatch, matchRegEx) {
     return {
         hasMatch: hasMatch, // instruction matched a regular expression
         isDesired: isDesiredMatch, // the instruction matched a regular expression flagging it as one to download
@@ -446,6 +585,8 @@ function ensureDirectory(directoryPath) {
 }
 
 async function downloadInstruction(instructionUrl, instructionTempFilename, instructionFilePath) {
+    if (debugControl.disableFileDownload) { return Promise.resolve(true); }
+
     await downloadFile(instructionUrl, instructionTempFilename, null);
     if (fs.existsSync(instructionTempFilename)) {
         fs.renameSync(instructionTempFilename, instructionFilePath);
