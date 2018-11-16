@@ -11,7 +11,7 @@ const fs = require('fs');
     1. hack because the lack of unit testing
 */
 const debugControl = {
-    disableFileDownload: true
+    disableFileDownload: false
 };
 
 const legoSiteResource = {
@@ -24,7 +24,8 @@ const legoSiteResource = {
             getSearchUrl: function (dataIndex, themeId) {
                 return `https://www.lego.com//service/biservice/searchbytheme?fromIndex=${dataIndex}&onlyAlternatives=false&theme=${themeId}`;
             }
-        }
+        },
+        url: 'https://www.lego.com/biassets/bi'
     }
 };
 
@@ -370,11 +371,8 @@ async function processProduct(product, legoInstructionRepsitoryPath) {
     // compute directory
     const productDirectoryName = `${productId} - ${productTitle}`;
     const productThemeDirectoryPath = path.resolve(legoInstructionRepsitoryPath, productTheme);
-    ensureDirectory(productThemeDirectoryPath);
     const productYearDirectoryPath = path.resolve(productThemeDirectoryPath, productYear);
-    ensureDirectory(productYearDirectoryPath);
     const productDirectoryPath = path.resolve(productYearDirectoryPath, productDirectoryName);
-    ensureDirectory(productDirectoryPath);
     const buildingInstructions = product.buildingInstructions.sort(buildingInstructionCompare);
 
     const productInfo = {
@@ -446,6 +444,12 @@ async function processProduct(product, legoInstructionRepsitoryPath) {
 }
 
 async function getInstruction(instructionPdfLocation, productId, productInstructionPath) {
+    /*
+        work around a bug in Lego's server that returned only the file name instead of a complete URL
+    */
+    if ( instructionPdfLocation.startsWith('/') ){
+        instructionPdfLocation = legoSiteResource.buildingInstructions.url + instructionPdfLocation;
+    }
     const instructionUrl = new URL(instructionPdfLocation);
     const instructionUrlPathname = instructionUrl.pathname;
     const pdfPathIndex = instructionUrlPathname.lastIndexOf("/");
@@ -462,6 +466,7 @@ async function getInstruction(instructionPdfLocation, productId, productInstruct
         isNew: false,
     };
     if (!fs.existsSync(instructionFilePath)) {
+        ensureDirectory(productInstructionPath);
         await downloadInstruction(instructionPdfLocation, instructionTempFilePath, instructionFilePath);
         instructionFileInfo.isNew = true;
     }
@@ -581,7 +586,11 @@ function newMatchResultModel(hasMatch, isDesiredMatch, matchRegEx) {
 
 function ensureDirectory(directoryPath) {
     if (fs.existsSync(directoryPath)) { return; }
-    fs.mkdirSync(directoryPath);
+    fs.mkdirSync(directoryPath, { recursive: true }, (error) => {
+        if ( error ) {
+            throw error;
+        }
+    });
 }
 
 async function downloadInstruction(instructionUrl, instructionTempFilename, instructionFilePath) {
