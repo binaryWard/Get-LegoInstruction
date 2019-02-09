@@ -30,7 +30,7 @@ const legoSiteResource = {
 };
 
 const dataValidation = {
-    productTheme: new RegExp("^[^\\s][\\w &\\-']+[^\\s]?$", "g"),
+    productTheme: new RegExp("^[^\\s][\\w &\\-'\\+]+[^\\s]?$", "g"),
     productId: new RegExp("^[^\\s]\\d+[^\\s]$", "g"),
     productTitle: new RegExp("^[^\\s][\\w '\\-\\d]+[^\\s]$", "g"),
     productYear: new RegExp("^(?:19[0-9]{2}|2[0-9]{3})$", "g"),
@@ -264,7 +264,8 @@ class dataPurification {
     }
 
     static isProductThemeValid(productTheme) {
-        return dataValidation.productTheme.test(productTheme);
+        dataValidation.productTheme.lastIndex = 0;
+        return dataValidation.productTheme.test(productTheme) && !productTheme.endsWith(' TM');
     }
 
     static isProductIdValid(productId) {
@@ -358,7 +359,6 @@ function lstringCompare(s1, s2) {
 
 function buildingInstructionCompare(leftInstruction, rightInstruction) {
     const descriptionResult = lstringCompare(leftInstruction.description, rightInstruction.description);
-
     return descriptionResult === 0 ? lstringCompare(leftInstruction.pdfLocation, rightInstruction.pdfLocation) : descriptionResult;
 }
 
